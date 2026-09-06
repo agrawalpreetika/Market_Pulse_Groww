@@ -1,4 +1,10 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MarketPulse
+
+MarketPulse is a smart market watchlist focused on explaining what meaningfully changed since a user's last review.
+
+Read the [Product and Architecture Decisions](docs/ARCHITECTURE_DECISIONS.md) for the product reasoning, reliability policies, edge cases, trade-offs, scalability decisions, and implementation roadmap.
+
+This project uses [Next.js](https://nextjs.org), TypeScript, PostgreSQL, Prisma, and provider-independent market-data services.
 
 ## Getting Started
 

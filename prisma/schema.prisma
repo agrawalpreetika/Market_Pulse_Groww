@@ -1,0 +1,224 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum InstrumentType {
+  EQUITY
+  ETF
+  INDEX
+}
+
+enum InstrumentStatus {
+  ACTIVE
+  INACTIVE
+  DELISTED
+}
+
+enum ReviewStatus {
+  OPEN
+  ACKNOWLEDGED
+  SUPERSEDED
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique @db.VarChar(255)
+  name      String?  @db.VarChar(120)
+  timezone  String   @default("Asia/Kolkata") @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  passwordHash String? @map("password_hash") @db.VarChar(255)
+
+  watchlists Watchlist[]
+
+  reviews WatchlistReview[]
+
+  @@map("users")
+}
+
+model Watchlist {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  name           String   @db.VarChar(80)
+  nameNormalized String   @map("name_normalized") @db.VarChar(80)
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items   WatchlistItem[]
+  reviews WatchlistReview[]
+
+  @@unique([userId, nameNormalized])
+  @@index([userId])
+  @@map("watchlists")
+}
+
+model Instrument {
+  id                 String           @id @default(uuid()) @db.Uuid
+  symbol             String           @db.VarChar(40)
+  name               String           @db.VarChar(255)
+  exchange           String           @db.VarChar(20)
+  instrumentType     InstrumentType   @map("instrument_type")
+  currency           String           @db.VarChar(10)
+  timezone           String           @db.VarChar(50)
+  providerIdentifier String?          @map("provider_identifier") @db.VarChar(120)
+  status             InstrumentStatus @default(ACTIVE)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  watchlistItems  WatchlistItem[]
+  quotes          Quote[]
+  latestQuote     LatestQuote?
+  reviewSnapshots ReviewSnapshotItem[]
+
+  @@unique([exchange, symbol, instrumentType])
+  @@index([symbol])
+  @@index([name])
+  @@map("instruments")
+}
+
+model WatchlistItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  watchlistId     String   @map("watchlist_id") @db.Uuid
+  instrumentId    String   @map("instrument_id") @db.Uuid
+  userNote        String?  @map("user_note") @db.Text
+  customThreshold Decimal? @map("custom_threshold") @db.Decimal(8, 4)
+  displayOrder    Int?     @map("display_order")
+  addedAt         DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  watchlist  Watchlist  @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@unique([watchlistId, instrumentId])
+  @@index([instrumentId])
+  @@map("watchlist_items")
+}
+
+enum MarketSession {
+  PRE_MARKET
+  REGULAR
+  AFTER_HOURS
+  CLOSED
+  UNKNOWN
+}
+
+enum QuoteQuality {
+  LIVE
+  DELAYED
+  STALE
+  INDICATIVE
+  CONFLICTED
+}
+
+enum SnapshotFreshness {
+  FRESH
+  AGING
+  STALE
+  DELAYED
+  INDICATIVE
+  CONFLICTED
+  MARKET_CLOSED
+  UNKNOWN
+}
+
+model Quote {
+  id                String        @id @default(uuid()) @db.Uuid
+  instrumentId      String        @map("instrument_id") @db.Uuid
+  price             Decimal       @db.Decimal(18, 6)
+  previousClose     Decimal?      @map("previous_close") @db.Decimal(18, 6)
+  open              Decimal?      @db.Decimal(18, 6)
+  high              Decimal?      @db.Decimal(18, 6)
+  low               Decimal?      @db.Decimal(18, 6)
+  volume            BigInt?
+  session           MarketSession @default(UNKNOWN)
+  quality           QuoteQuality
+  source            String        @db.VarChar(50)
+  providerTimestamp DateTime      @map("provider_timestamp") @db.Timestamptz(6)
+  receivedAt        DateTime      @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([instrumentId, source, providerTimestamp])
+  @@index([instrumentId, providerTimestamp(sort: Desc)])
+  @@index([providerTimestamp])
+  @@map("quotes")
+}
+
+model LatestQuote {
+  instrumentId      String        @id @map("instrument_id") @db.Uuid
+  price             Decimal       @db.Decimal(18, 6)
+  previousClose     Decimal?      @map("previous_close") @db.Decimal(18, 6)
+  open              Decimal?      @db.Decimal(18, 6)
+  high              Decimal?      @db.Decimal(18, 6)
+  low               Decimal?      @db.Decimal(18, 6)
+  volume            BigInt?
+  session           MarketSession @default(UNKNOWN)
+  quality           QuoteQuality
+  source            String        @db.VarChar(50)
+  providerTimestamp DateTime      @map("provider_timestamp") @db.Timestamptz(6)
+  receivedAt        DateTime      @default(now()) @map("received_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@index([providerTimestamp])
+  @@map("latest_quotes")
+}
+
+model WatchlistReview {
+  id               String       @id @default(uuid()) @db.Uuid
+  watchlistId      String       @map("watchlist_id") @db.Uuid
+  userId           String       @map("user_id") @db.Uuid
+  baselineReviewId String?      @map("baseline_review_id") @db.Uuid
+  snapshotAt       DateTime     @map("snapshot_at") @db.Timestamptz(6)
+  status           ReviewStatus @default(OPEN)
+  version          Int          @default(1)
+  policyVersion String @default("price-movement-v1") @map("policy_version") @db.VarChar(50)
+  acknowledgedAt   DateTime?    @map("acknowledged_at") @db.Timestamptz(6)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  watchlist Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  baselineReview WatchlistReview?  @relation("ReviewBaseline", fields: [baselineReviewId], references: [id], onDelete: SetNull)
+  derivedReviews WatchlistReview[] @relation("ReviewBaseline")
+
+  items ReviewSnapshotItem[]
+
+  @@index([watchlistId, status])
+  @@index([userId])
+  @@index([baselineReviewId])
+  @@index([snapshotAt])
+  @@map("watchlist_reviews")
+}
+
+model ReviewSnapshotItem {
+  id                String        @id @default(uuid()) @db.Uuid
+  reviewId          String        @map("review_id") @db.Uuid
+  instrumentId      String        @map("instrument_id") @db.Uuid
+  price             Decimal?      @db.Decimal(18, 6)
+  previousClose     Decimal?      @map("previous_close") @db.Decimal(18, 6)
+  volume            BigInt?
+  quoteQuality      QuoteQuality?      @map("quote_quality")
+  quoteSource        String?            @map("quote_source") @db.VarChar(100)
+  marketSession     MarketSession?     @map("market_session")
+  freshnessStatus   SnapshotFreshness  @default(UNKNOWN) @map("freshness_status")
+  quoteAgeSeconds   Int?               @map("quote_age_seconds")
+  providerTimestamp DateTime?          @map("provider_timestamp") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  review     WatchlistReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  instrument Instrument      @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@unique([reviewId, instrumentId])
+  @@index([instrumentId])
+  @@map("review_snapshot_items")
+}
