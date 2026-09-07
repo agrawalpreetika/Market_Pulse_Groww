@@ -6,7 +6,7 @@ import { createRunId, safeError, structuredLog } from "@/shared/observability/st
 
 const runId = createRunId();
 
-dailyPriceHistoryService.refreshWatchedHistory()
+dailyPriceHistoryService.refreshWatchedHistory(new Date(), { force: true })
   .then((result) => {
     structuredLog("info", "daily-history-refresh-completed", { runId, ...result });
   })

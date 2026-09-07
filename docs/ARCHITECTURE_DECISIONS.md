@@ -401,10 +401,22 @@ Next coverage should include HTTP-level session/cookie authorization, repository
 5. **Completed locally:** bounded Yahoo timeouts, retry budgets with exponential backoff and jitter, and an in-process circuit breaker.
 6. **Completed:** Redis discovery caching and distributed refresh locks with graceful degradation.
 7. **Completed with explicit limits:** V5 integrates validated completed-date daily OHLCV into immutable, horizon-aware historical context. V1–V4 remain replayable; Yahoo is still unofficial.
-8. **Next:** automate the daily backfill, add retention/downsampling, and expand browser coverage for V5 signal presentation.
+8. **In progress:** daily-history backfill is automated with durable per-instrument checkpoints, bounded batches, retry backoff, retention, and a distributed lease. Browser coverage for V5 signal presentation remains.
 
-The dashboard exposes the policy version, confidence, exact applied low/medium/high thresholds, verified signal labels, and historical sample availability. Custom thresholds are configured per watchlist membership during instrument addition and are frozen into reviews; later UI changes cannot rewrite past review meaning. AI receives the same verified V3 fields and may describe only signal identifiers supplied by deterministic code.
+The dashboard exposes the policy version, confidence, exact applied low/medium/high thresholds, verified signal labels, and historical sample availability. Custom thresholds are configured per watchlist membership during instrument addition and are frozen into reviews; later UI changes cannot rewrite past review meaning. AI receives the same verified V5 fields and may describe only signal identifiers supplied by deterministic code.
 9. **Before production:** licensed provider decision, deployment, security review, retention policy, monitoring, and load tests.
+
+### ADR-028: Maintain completed daily history as an independent background concern
+
+**Status:** Implemented
+
+Daily history is not fetched during a dashboard request. The market worker checks for history work at startup and every 15 minutes, while PostgreSQL checkpoints decide which instruments are actually due. A newly watched instrument has no checkpoint and is therefore backfilled on the next check. An existing instrument is eligible only when its checkpoint is behind the latest completed exchange date. Unsuccessful instruments retry after a one-hour backoff rather than on every worker tick.
+
+History work uses a Redis lease separate from the live-quote lease, so horizontally scaled workers do not download the same history concurrently. PostgreSQL remains the durable source of completion state; Redis is coordination rather than correctness storage. If Redis is unavailable, idempotent database upserts preserve data integrity, although duplicate provider work can occur across processes during that degraded period.
+
+The provider is called in bounded batches of 20 instruments. Bars are unique by instrument, source and trading date, so retries and overlapping three-month provider windows are safe. A checkpoint advances only when at least one valid bar is returned for that instrument; empty or failed responses remain retryable. The target date becomes the current weekday only after 16:00 IST, leaving a buffer after the regular close; before then and on weekends it is the previous weekday. Exchange holidays are not inferred locally: a successful provider response can checkpoint the attempted completed date without inventing a candle.
+
+Daily bars older than 730 days are removed after a cycle that performs provider work. V5 reads only a recent bounded window, so this keeps storage growth predictable while retaining far more context than the scoring policy currently needs. Daily data is already compact and is not downsampled; downsampling would lose real trading-session observations and is reserved for future intraday data. All intervals, batch size, retry delay and retention are bounded environment settings.
 
 ## Evaluator-ready explanation
 

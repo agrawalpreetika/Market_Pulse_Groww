@@ -23,7 +23,7 @@ type LatestQuote = {
   change: {
     absolute: string;
     percent: string;
-  };
+  } | null;
   volume: string | null;
   quality: string;
   session: string;
@@ -544,7 +544,9 @@ function refreshDisplayedData() {
 
                     {watchlist.items.map((item) => {
                       const quote = item.instrument.latestQuote;
-                      const percentChange = quote ? Number(quote.change.percent) : null;
+                      const percentChange = quote?.change
+                        ? Number(quote.change.percent)
+                        : null;
 
                       return (
                         <article

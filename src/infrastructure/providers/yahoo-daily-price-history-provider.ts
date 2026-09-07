@@ -46,6 +46,8 @@ export function yahooDailyHistorySymbol(
 export class YahooDailyPriceHistoryProvider
   implements DailyPriceHistoryProvider
 {
+  readonly source = "yahoo-finance-unofficial";
+
   async getDailyBars(
     instruments: DailyHistoryInstrument[],
     now = new Date(),

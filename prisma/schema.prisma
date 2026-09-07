@@ -27,13 +27,13 @@ enum ReviewStatus {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  email     String   @unique @db.VarChar(255)
-  name      String?  @db.VarChar(120)
-  timezone  String   @default("Asia/Kolkata") @db.VarChar(50)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  passwordHash String? @map("password_hash") @db.VarChar(255)
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  name         String?  @db.VarChar(120)
+  timezone     String   @default("Asia/Kolkata") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  passwordHash String?  @map("password_hash") @db.VarChar(255)
 
   watchlists Watchlist[]
 
@@ -73,11 +73,12 @@ model Instrument {
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  watchlistItems  WatchlistItem[]
-  quotes          Quote[]
-  latestQuote     LatestQuote?
-  reviewSnapshots ReviewSnapshotItem[]
-  dailyPriceBars  DailyPriceBar[]
+  watchlistItems         WatchlistItem[]
+  quotes                 Quote[]
+  latestQuote            LatestQuote?
+  reviewSnapshots        ReviewSnapshotItem[]
+  dailyPriceBars         DailyPriceBar[]
+  dailyHistorySyncStates DailyHistorySyncState[]
 
   @@unique([exchange, symbol, instrumentType])
   @@index([symbol])
@@ -125,6 +126,24 @@ model DailyPriceBar {
   @@index([instrumentId, tradingDate(sort: Desc)])
   @@index([tradingDate])
   @@map("daily_price_bars")
+}
+
+model DailyHistorySyncState {
+  id                 String    @id @default(uuid()) @db.Uuid
+  instrumentId       String    @map("instrument_id") @db.Uuid
+  source             String    @db.VarChar(50)
+  checkedThroughDate DateTime? @map("checked_through_date") @db.Date
+  lastAttemptAt      DateTime  @map("last_attempt_at") @db.Timestamptz(6)
+  lastSucceededAt    DateTime? @map("last_succeeded_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([instrumentId, source])
+  @@index([source, checkedThroughDate])
+  @@index([lastAttemptAt])
+  @@map("daily_history_sync_states")
 }
 
 enum MarketSession {
@@ -216,7 +235,7 @@ model WatchlistReview {
   snapshotAt       DateTime     @map("snapshot_at") @db.Timestamptz(6)
   status           ReviewStatus @default(OPEN)
   version          Int          @default(1)
-  policyVersion String @default("price-movement-v1") @map("policy_version") @db.VarChar(50)
+  policyVersion    String       @default("price-movement-v1") @map("policy_version") @db.VarChar(50)
   acknowledgedAt   DateTime?    @map("acknowledged_at") @db.Timestamptz(6)
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -237,29 +256,29 @@ model WatchlistReview {
 }
 
 model ReviewSnapshotItem {
-  id                String        @id @default(uuid()) @db.Uuid
-  reviewId          String        @map("review_id") @db.Uuid
-  instrumentId      String        @map("instrument_id") @db.Uuid
-  price             Decimal?      @db.Decimal(18, 6)
-  previousClose     Decimal?      @map("previous_close") @db.Decimal(18, 6)
-  volume            BigInt?
-  quoteQuality      QuoteQuality?      @map("quote_quality")
-  quoteSource        String?            @map("quote_source") @db.VarChar(100)
-  marketSession     MarketSession?     @map("market_session")
-  freshnessStatus   SnapshotFreshness  @default(UNKNOWN) @map("freshness_status")
-  quoteAgeSeconds   Int?               @map("quote_age_seconds")
-  customThresholdPercent Decimal?      @map("custom_threshold_percent") @db.Decimal(8, 4)
-  referenceSampleCount Int             @default(0) @map("reference_sample_count")
-  referenceVolatilityPercent Decimal?  @map("reference_volatility_percent") @db.Decimal(10, 4)
-  referenceHigh Decimal?               @map("reference_high") @db.Decimal(18, 6)
-  referenceLow Decimal?                @map("reference_low") @db.Decimal(18, 6)
-  referenceMedianVolume BigInt?        @map("reference_median_volume")
-  referenceVolumeSampleCount Int       @default(0) @map("reference_volume_sample_count")
-  referenceHorizonSessions Int         @default(0) @map("reference_horizon_sessions")
-  referenceSource String?              @map("reference_source") @db.VarChar(50)
-  referencePriceBasis ReferencePriceBasis @default(NONE) @map("reference_price_basis")
-  providerTimestamp DateTime?          @map("provider_timestamp") @db.Timestamptz(6)
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                         String              @id @default(uuid()) @db.Uuid
+  reviewId                   String              @map("review_id") @db.Uuid
+  instrumentId               String              @map("instrument_id") @db.Uuid
+  price                      Decimal?            @db.Decimal(18, 6)
+  previousClose              Decimal?            @map("previous_close") @db.Decimal(18, 6)
+  volume                     BigInt?
+  quoteQuality               QuoteQuality?       @map("quote_quality")
+  quoteSource                String?             @map("quote_source") @db.VarChar(100)
+  marketSession              MarketSession?      @map("market_session")
+  freshnessStatus            SnapshotFreshness   @default(UNKNOWN) @map("freshness_status")
+  quoteAgeSeconds            Int?                @map("quote_age_seconds")
+  customThresholdPercent     Decimal?            @map("custom_threshold_percent") @db.Decimal(8, 4)
+  referenceSampleCount       Int                 @default(0) @map("reference_sample_count")
+  referenceVolatilityPercent Decimal?            @map("reference_volatility_percent") @db.Decimal(10, 4)
+  referenceHigh              Decimal?            @map("reference_high") @db.Decimal(18, 6)
+  referenceLow               Decimal?            @map("reference_low") @db.Decimal(18, 6)
+  referenceMedianVolume      BigInt?             @map("reference_median_volume")
+  referenceVolumeSampleCount Int                 @default(0) @map("reference_volume_sample_count")
+  referenceHorizonSessions   Int                 @default(0) @map("reference_horizon_sessions")
+  referenceSource            String?             @map("reference_source") @db.VarChar(50)
+  referencePriceBasis        ReferencePriceBasis @default(NONE) @map("reference_price_basis")
+  providerTimestamp          DateTime?           @map("provider_timestamp") @db.Timestamptz(6)
+  createdAt                  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
   review     WatchlistReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   instrument Instrument      @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
