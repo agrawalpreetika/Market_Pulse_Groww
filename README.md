@@ -389,9 +389,9 @@ Further production work includes provider-specific quota enforcement, exchange c
 
 After uploading the walkthrough to YouTube, Google Drive, Loom, or another public host, replace the placeholders below:
 
-```markdown
-[![Watch the MarketPulse demo](YOUR_THUMBNAIL_URL)](YOUR_VIDEO_URL)
-```
+
+https://github.com/user-attachments/assets/654a4580-060e-4eb3-bf07-e4f0d9b913e5
+
 
 Recommended walkthrough: create two watchlists, add exchange-aware instruments, explain the two market views, establish a baseline, run the deterministic moved scenario, inspect confidence/provenance/chart markers, and generate the optional AI explanation.
 
