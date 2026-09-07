@@ -11,7 +11,7 @@ import type {
 } from "../src/modules/reviews/calculate-meaningful-change";
 
 import {
-  getCurrentChangeDetectionPolicy,
+  getChangeDetectionPolicy,
 } from "../src/modules/change-detection/change-detection-policy";
 
 import type {
@@ -19,7 +19,56 @@ import type {
 } from "../src/modules/change-detection/change-detection-policy";
 
 const policy =
-  getCurrentChangeDetectionPolicy();
+  getChangeDetectionPolicy("historical-context-v3");
+
+test("v4 declines unsupported volatility and full-day volume even with legacy context", () => {
+  const result = calculateMeaningfulChangeWithPolicy(snapshot({
+    price: 102, marketSession: "CLOSED", volume: BigInt(100000),
+    referenceSampleCount: 30, referenceVolatilityPercent: 0.25,
+    referenceMedianVolume: BigInt(1000), referenceVolumeSampleCount: 30,
+  }), snapshot(), getChangeDetectionPolicy("observed-context-v4"));
+  assert.equal(result.attentionLevel, "MEDIUM");
+  assert.equal(result.volatilityMultiple, null);
+  assert.equal(result.volumeMultiple, null);
+  assert.equal(result.dataStatus, "LIMITED");
+});
+
+test("v5 uses review-horizon volatility from completed daily history", () => {
+  const result = calculateMeaningfulChangeWithPolicy(
+    snapshot({
+      price: 102,
+      referenceSampleCount: 30,
+      referenceVolatilityPercent: 0.5,
+      referenceHorizonSessions: 4,
+      referenceSource: "test-provider",
+      referencePriceBasis: "ADJUSTED_CLOSE",
+    }),
+    snapshot(),
+    getChangeDetectionPolicy("daily-context-v5"),
+  );
+
+  assert.equal(result.volatilityMultiple, 4);
+  assert.equal(result.attentionLevel, "HIGH");
+  assert.ok(result.signals.includes("VOLATILITY_ADJUSTED_MOVE"));
+  assert.ok(result.reasons.some((reason) => reason.includes("review-period session")));
+});
+
+test("v5 exposes insufficient or unadjusted daily evidence", () => {
+  const result = calculateMeaningfulChangeWithPolicy(
+    snapshot({
+      price: 102,
+      referenceSampleCount: 5,
+      referencePriceBasis: "NONE",
+    }),
+    snapshot(),
+    getChangeDetectionPolicy("daily-context-v5"),
+  );
+
+  assert.equal(result.volatilityMultiple, null);
+  assert.equal(result.dataStatus, "LIMITED");
+  assert.ok(result.warnings.some((warning) => warning.includes("at least 10")));
+  assert.ok(result.warnings.some((warning) => warning.includes("adjusted-close")));
+});
 
 function calculateMeaningfulChange(
   current: SnapshotForComparison,
@@ -536,4 +585,107 @@ test("market closed takes display priority over delayed quality", () => {
     "Current quote was marked delayed",
     "Baseline quote was marked delayed",
   ]);
+});
+
+test("v2 applies a frozen custom threshold without changing v1", () => {
+  const v2Result = calculateMeaningfulChange(
+    snapshot({ price: 102, customThresholdPercent: 3 }),
+    snapshot(),
+  );
+  const v1Result = calculateMeaningfulChange(
+    snapshot({ price: 102, customThresholdPercent: 3 }),
+    snapshot(),
+    getChangeDetectionPolicy("price-movement-v1"),
+  );
+
+  assert.equal(v2Result.attentionLevel, "NONE");
+  assert.deepEqual(v2Result.appliedThresholds, {
+    lowPercent: 3,
+    mediumPercent: 6,
+    highPercent: 12,
+  });
+  assert.equal(v1Result.attentionLevel, "MEDIUM");
+});
+
+test("v2 identifies a material current-session reversal", () => {
+  const result = calculateMeaningfulChange(
+    snapshot({ price: 104, previousClose: 106 }),
+    snapshot({ price: 100 }),
+  );
+
+  assert.equal(result.attentionLevel, "HIGH");
+  assert.equal(result.confidence, "HIGH");
+  assert.ok(result.signals.includes("SESSION_DIRECTION_REVERSAL"));
+  assert.ok(result.reasons.some((reason) => reason.includes("reversed")));
+});
+
+test("warnings reduce confidence without discarding a valid comparison", () => {
+  const result = calculateMeaningfulChange(
+    snapshot({ price: 104, quoteQuality: "DELAYED" }),
+    snapshot(),
+  );
+
+  assert.equal(result.dataStatus, "LIMITED");
+  assert.equal(result.confidence, "MEDIUM");
+});
+
+test("v3 detects a volatility-adjusted move with sufficient history", () => {
+  const result = calculateMeaningfulChange(
+    snapshot({
+      price: 102,
+      referenceSampleCount: 20,
+      referenceVolatilityPercent: 0.5,
+      referenceHigh: 105,
+      referenceLow: 95,
+    }),
+    snapshot({ price: 100 }),
+  );
+
+  assert.equal(result.attentionLevel, "HIGH");
+  assert.equal(result.volatilityMultiple, 4);
+  assert.ok(result.signals.includes("VOLATILITY_ADJUSTED_MOVE"));
+});
+
+test("v3 detects a recent-range breakout", () => {
+  const result = calculateMeaningfulChange(
+    snapshot({
+      price: 102,
+      referenceSampleCount: 20,
+      referenceHigh: 101,
+      referenceLow: 90,
+    }),
+    snapshot({ price: 100 }),
+  );
+
+  assert.equal(result.rangeBreakout, "UP");
+  assert.equal(result.attentionLevel, "MEDIUM");
+  assert.ok(result.signals.includes("RECENT_RANGE_BREAKOUT"));
+});
+
+test("v3 uses volume only for a completed session with enough history", () => {
+  const closed = calculateMeaningfulChange(
+    snapshot({
+      price: 102,
+      volume: BigInt(3_000),
+      marketSession: "CLOSED",
+      referenceMedianVolume: BigInt(1_000),
+      referenceVolumeSampleCount: 10,
+    }),
+    snapshot({ price: 100 }),
+  );
+  const live = calculateMeaningfulChange(
+    snapshot({
+      price: 102,
+      volume: BigInt(3_000),
+      marketSession: "REGULAR",
+      referenceMedianVolume: BigInt(1_000),
+      referenceVolumeSampleCount: 10,
+    }),
+    snapshot({ price: 100 }),
+  );
+
+  assert.equal(closed.volumeMultiple, 3);
+  assert.ok(closed.signals.includes("ABNORMAL_CLOSED_SESSION_VOLUME"));
+  assert.equal(live.volumeMultiple, null);
+  assert.ok(!live.signals.includes("ABNORMAL_CLOSED_SESSION_VOLUME"));
 });

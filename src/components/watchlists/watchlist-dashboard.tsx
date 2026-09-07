@@ -84,7 +84,8 @@ function formatVolume(value: string | null) {
 }
 
 export function WatchlistDashboard({ currentUser }: Props) {
-    const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [showInstrumentSearch, setShowInstrumentSearch] = useState(false);
 
   const [lastDisplayedRefreshAt, setLastDisplayedRefreshAt] =
     useState<Date | null>(null);
@@ -371,11 +372,10 @@ function refreshDisplayedData() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() =>
-                    setSelectedWatchlistId(
-                      item.id,
-                    )
-                  }
+                  onClick={() => {
+                    setShowInstrumentSearch(false);
+                    setSelectedWatchlistId(item.id);
+                  }}
                   className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left transition ${
                     isSelected
                       ? "bg-cyan-400 text-slate-950"
@@ -446,16 +446,25 @@ function refreshDisplayedData() {
                 </div>
 
                 <div className="text-right">
-                  <button
-                    type="button"
-                    onClick={refreshDisplayedData}
-                    disabled={isLoading}
-                    className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:border-cyan-400 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isLoading
-                      ? "Refreshing…"
-                      : "Refresh displayed data"}
-                  </button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInstrumentSearch((current) => !current)}
+                      aria-expanded={showInstrumentSearch}
+                      className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300"
+                    >
+                      {showInstrumentSearch ? "Close search" : "Add instrument"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={refreshDisplayedData}
+                      disabled={isLoading}
+                      className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:border-cyan-400 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isLoading ? "Refreshing…" : "Refresh"}
+                    </button>
+                  </div>
 
                   <p className="mt-2 text-xs text-slate-500">
                     {lastDisplayedRefreshAt
@@ -476,21 +485,26 @@ function refreshDisplayedData() {
                 </div>
               </div>
               
-                          <WatchlistActions
-  key={`${watchlist.id}-${watchlist.version}`}
-  watchlist={watchlist}
-  onRenamed={handleWatchlistRenamed}
-  onDeleted={handleWatchlistDeleted}
-/>
-                          
-            <InstrumentSearch
-  key={`instrument-search-${watchlist.id}`}
-  watchlistId={watchlist.id}
-  existingInstrumentIds={watchlist.items.map(
-    (item) => item.instrument.id,
-  )}
-  onAdded={handleInstrumentAdded}
-/>
+              <details className="mb-4 text-sm text-slate-400">
+                <summary className="cursor-pointer hover:text-slate-200">Watchlist settings</summary>
+                <div className="mt-3">
+                  <WatchlistActions
+                    key={`${watchlist.id}-${watchlist.version}`}
+                    watchlist={watchlist}
+                    onRenamed={handleWatchlistRenamed}
+                    onDeleted={handleWatchlistDeleted}
+                  />
+                </div>
+              </details>
+
+              {showInstrumentSearch ? (
+                <InstrumentSearch
+                  key={`instrument-search-${watchlist.id}`}
+                  watchlistId={watchlist.id}
+                  existingInstrumentIds={watchlist.items.map((item) => item.instrument.id)}
+                  onAdded={handleInstrumentAdded}
+                />
+              ) : null}
             {watchlist.items.length > 0 ? (
   <ReviewPanel
     key={`review-panel-${watchlist.id}`}
@@ -508,136 +522,101 @@ function refreshDisplayedData() {
                   </p>
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
-                  <div className="hidden grid-cols-[1.5fr_1fr_1fr_1fr] gap-4 border-b border-slate-800 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 md:grid">
-                    <span>Instrument</span>
-                    <span>Latest price</span>
-                    <span>Today</span>
-                    <span>Data status</span>
+                <section aria-labelledby="current-market-heading">
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Current market
+                    </p>
+                    <h3 id="current-market-heading" className="mt-1 text-lg font-semibold">
+                      Latest prices
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Today’s market position. This is separate from the since-review comparison above.
+                    </p>
                   </div>
 
-                  {watchlist.items.map((item) => {
-                    const quote =
-                      item.instrument.latestQuote;
+                  <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+                    <div className="hidden grid-cols-[1.5fr_1fr_1fr] gap-4 border-b border-slate-800 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 md:grid">
+                      <span>Instrument</span>
+                      <span>Price and today</span>
+                      <span>Availability</span>
+                    </div>
 
-                    const percentChange = quote
-                      ? Number(
-                          quote.change.percent,
-                        )
-                      : null;
+                    {watchlist.items.map((item) => {
+                      const quote = item.instrument.latestQuote;
+                      const percentChange = quote ? Number(quote.change.percent) : null;
 
-                    return (
-                      <article
-                        key={item.id}
-                        className="grid gap-4 border-b border-slate-800 px-5 py-5 last:border-b-0 md:grid-cols-[1.5fr_1fr_1fr_1fr] md:items-center"
-                      >
-                        <div>
-                          <div className="font-semibold">
-                            {item.instrument.symbol}
+                      return (
+                        <article
+                          key={item.id}
+                          className="grid gap-4 border-b border-slate-800 px-5 py-5 last:border-b-0 md:grid-cols-[1.5fr_1fr_1fr] md:items-center"
+                        >
+                          <div>
+                            <div className="font-semibold">{item.instrument.symbol}</div>
+                            <div className="mt-1 text-sm text-slate-400">{item.instrument.name}</div>
+                            <div className="mt-1 text-xs text-slate-500">{item.instrument.exchange}</div>
                           </div>
 
-                          <div className="mt-1 text-sm text-slate-400">
-                            {item.instrument.name}
-                          </div>
-
-                          <div className="mt-1 text-xs text-slate-500">
-                            {item.instrument.exchange}
-                          </div>
-                          
-                          <PriceHistoryChart
-  instrumentId={item.instrument.id}
-  symbol={item.instrument.symbol}
-  currency={item.instrument.currency}
-/>
-                                
-                                <RemoveInstrumentButton
-  watchlistId={watchlist.id}
-  instrumentId={item.instrument.id}
-  symbol={item.instrument.symbol}
-  onRemoved={handleInstrumentRemoved}
-/>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-slate-500 md:hidden">
-                            Latest price
-                          </p>
-
-                          <p className="mt-1 font-medium">
-                            {quote
-                              ? formatPrice(
-                                  quote.price,
-                                  item.instrument
-                                    .currency,
-                                )
-                              : "Unavailable"}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            Volume{" "}
-                            {formatVolume(
-                              quote?.volume ?? null,
-                            )}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-slate-500 md:hidden">
-                            Today
-                          </p>
-
-                          <p
-                            className={`mt-1 font-medium ${
+                          <div>
+                            <p className="text-xs text-slate-500 md:hidden">Price and today</p>
+                            <p className="mt-1 font-medium">
+                              {quote ? formatPrice(quote.price, item.instrument.currency) : "Unavailable"}
+                            </p>
+                            <p className={`mt-1 text-sm font-medium ${
                               percentChange === null
                                 ? "text-slate-400"
                                 : percentChange >= 0
                                   ? "text-emerald-400"
                                   : "text-red-400"
-                            }`}
-                          >
-                            {percentChange === null
-                              ? "Unavailable"
-                              : `${percentChange >= 0 ? "+" : ""}${percentChange.toFixed(2)}%`}
-                          </p>
-                        </div>
+                            }`}>
+                              {percentChange === null
+                                ? "Today unavailable"
+                                : `${percentChange >= 0 ? "+" : ""}${percentChange.toFixed(2)}% today`}
+                            </p>
+                          </div>
 
-                        <div>
-                          <p className="text-xs text-slate-500 md:hidden">
-                            Data status
-                          </p>
-
-                          {quote ? (
-                            <>
-                              <span
-                                className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                  quote.freshness
-                                    .status ===
-                                  "FRESH"
-                                    ? "bg-emerald-400/10 text-emerald-300"
-                                    : "bg-amber-400/10 text-amber-300"
-                                }`}
-                              >
-                                {
-                                  quote.freshness
-                                    .status
-                                }
+                          <div>
+                            <p className="text-xs text-slate-500 md:hidden">Availability</p>
+                            {quote ? (
+                              <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                                quote.freshness.status === "FRESH"
+                                  ? "bg-emerald-400/10 text-emerald-300"
+                                  : "bg-amber-400/10 text-amber-300"
+                              }`}>
+                                {quote.freshness.status.replaceAll("_", " ")}
                               </span>
+                            ) : (
+                              <span className="text-sm text-slate-500">No quote</span>
+                            )}
+                          </div>
 
-                              <p className="mt-2 text-xs text-slate-500">
-                                {quote.quality} ·{" "}
-                                {quote.source}
+                          <details className="md:col-span-3">
+                            <summary className="cursor-pointer text-xs font-medium text-cyan-300">
+                              Chart and data details
+                            </summary>
+                            <div className="mt-3 rounded-lg bg-slate-950/50 p-3 text-xs text-slate-400">
+                              <p>
+                                Volume: {formatVolume(quote?.volume ?? null)}
+                                {quote ? ` · ${quote.quality} · ${quote.source}` : ""}
                               </p>
-                            </>
-                          ) : (
-                            <span className="text-sm text-slate-500">
-                              No quote
-                            </span>
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
+                              <PriceHistoryChart
+                                instrumentId={item.instrument.id}
+                                symbol={item.instrument.symbol}
+                                currency={item.instrument.currency}
+                              />
+                              <RemoveInstrumentButton
+                                watchlistId={watchlist.id}
+                                instrumentId={item.instrument.id}
+                                symbol={item.instrument.symbol}
+                                onRemoved={handleInstrumentRemoved}
+                              />
+                            </div>
+                          </details>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
               )}
             </>
           ) : null}

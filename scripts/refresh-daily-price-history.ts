@@ -1,25 +1,20 @@
 import "dotenv/config";
 
 import { prisma } from "@/infrastructure/database/prisma";
-import { marketDataService } from "@/modules/market-data/market-data.service";
+import { dailyPriceHistoryService } from "@/modules/market-data/daily-price-history.service";
 import { createRunId, safeError, structuredLog } from "@/shared/observability/structured-log";
 
 const runId = createRunId();
 
-async function main() {
-  const result =
-    await marketDataService.refreshWatchedQuotes({ runId });
-
-  structuredLog("info", "market-refresh-completed", result);
-}
-
-main()
+dailyPriceHistoryService.refreshWatchedHistory()
+  .then((result) => {
+    structuredLog("info", "daily-history-refresh-completed", { runId, ...result });
+  })
   .catch((error: unknown) => {
-    structuredLog("error", "market-refresh-failed", {
+    structuredLog("error", "daily-history-refresh-failed", {
       runId,
       error: safeError(error),
     });
-
     process.exitCode = 1;
   })
   .finally(async () => {

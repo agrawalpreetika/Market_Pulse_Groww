@@ -35,6 +35,7 @@ export function InstrumentSearch({
   onAdded,
 }: Props) {
   const [query, setQuery] = useState("");
+  const [customThreshold, setCustomThreshold] = useState("");
   const [results, setResults] = useState<Instrument[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -137,6 +138,17 @@ export function InstrumentSearch({
     setMessage(null);
 
     try {
+      const threshold = customThreshold.trim()
+        ? Number(customThreshold)
+        : undefined;
+
+      if (
+        threshold !== undefined &&
+        (!Number.isFinite(threshold) || threshold <= 0 || threshold > 100)
+      ) {
+        throw new Error("Threshold must be between 0 and 100 percent.");
+      }
+
       const response = await fetch(
         `/api/watchlists/${watchlistId}/items`,
         {
@@ -150,10 +162,12 @@ export function InstrumentSearch({
         source: "YAHOO",
         providerIdentifier:
           instrument.providerIdentifier,
+        ...(threshold === undefined ? {} : { customThreshold: threshold }),
       }
     : {
         source: "CATALOG",
         instrumentId: instrument.id,
+        ...(threshold === undefined ? {} : { customThreshold: threshold }),
       },
 ),
         },
@@ -228,6 +242,34 @@ export function InstrumentSearch({
           {isSearching ? "Searching…" : "Search"}
         </button>
       </form>
+
+      <details className="mt-3 max-w-md">
+        <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-200">
+          Advanced: customize the meaningful-movement level
+        </summary>
+        <div className="mt-3 rounded-lg bg-slate-950/50 p-3">
+          <label htmlFor="instrument-threshold" className="text-xs font-medium text-slate-300">
+            Notify me when movement reaches
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              id="instrument-threshold"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+              value={customThreshold}
+              onChange={(event) => setCustomThreshold(event.target.value)}
+              placeholder="Default: 1"
+              className="w-36 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-400"
+            />
+            <span className="text-sm text-slate-400">%</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Leave this empty to use 1%. This setting applies only to instruments added while it is set.
+          </p>
+        </div>
+      </details>
 
       {error ? (
         <p role="alert" className="mt-3 text-sm text-red-300">

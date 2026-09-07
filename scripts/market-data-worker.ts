@@ -5,6 +5,7 @@ import { disconnectRedis } from "../src/infrastructure/cache/redis";
 import { runWithDistributedLease } from "../src/infrastructure/coordination/distributed-lease";
 import { getIndianMarketState } from "../src/modules/market-data/indian-market-hours";
 import { marketDataService } from "../src/modules/market-data/market-data.service";
+import { createRunId, safeError, structuredLog } from "../src/shared/observability/structured-log";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1_000;
 const MINIMUM_INTERVAL_MS = 30 * 1_000;
@@ -37,16 +38,15 @@ async function runRefreshCycle() {
   }
 
   const now = new Date();
+  const runId = createRunId();
   const market = getIndianMarketState(now);
 
   if (!market.shouldRefresh) {
-    console.log(
-      JSON.stringify({
-        event: "market-refresh-skipped",
+    structuredLog("info", "market-refresh-skipped", {
+        runId,
         marketState: market.state,
         checkedAt: now.toISOString(),
-      }),
-    );
+      });
 
     return;
   }
@@ -57,35 +57,30 @@ async function runRefreshCycle() {
     const leaseResult = await runWithDistributedLease({
       key: "market-pulse:v1:lease:market-refresh",
       ttlMs: REFRESH_LEASE_TTL_MS,
-      task: () => marketDataService.refreshWatchedQuotes(),
+      task: () => marketDataService.refreshWatchedQuotes({ runId }),
     });
 
     if (leaseResult.outcome === "LOCKED") {
-      console.log(
-        JSON.stringify({
-          event: "market-refresh-skipped",
+      structuredLog("info", "market-refresh-skipped", {
+          runId,
           reason: "DISTRIBUTED_LEASE_HELD",
           checkedAt: new Date().toISOString(),
-        }),
-      );
+        });
       return;
     }
 
     const result = leaseResult.value;
 
-    console.log(
-      JSON.stringify({
-        event: "market-refresh-completed",
+    structuredLog("info", "market-refresh-completed", {
         coordination: leaseResult.outcome,
         completedAt: new Date().toISOString(),
         ...result,
-      }),
-    );
+      });
   } catch (error: unknown) {
-    console.error(
-      "Automatic market-data refresh failed",
-      error,
-    );
+    structuredLog("error", "market-refresh-failed", {
+      runId,
+      error: safeError(error),
+    });
   } finally {
     refreshInProgress = false;
   }

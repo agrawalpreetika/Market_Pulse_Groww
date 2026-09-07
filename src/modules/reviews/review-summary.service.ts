@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { reviewService } from "./review.service";
+import { validateGeneratedReviewSummary } from "./validate-generated-summary";
 
 type Comparison = Awaited<
   ReturnType<
@@ -49,8 +50,13 @@ function createTemplateSummary(
     )
     .slice(0, 3);
 
+  const assessableCount =
+    comparison.summary.total - comparison.summary.unavailable;
+
   const summary =
-    importantChanges.length === 0
+    assessableCount === 0
+      ? "No instruments could be assessed against a valid baseline in this review."
+      : importantChanges.length === 0
       ? `No instruments crossed the current ${comparison.policy.displayName} attention thresholds.`
       : `${importantChanges.length} instrument${importantChanges.length === 1 ? "" : "s"} deserve attention under ${comparison.policy.displayName}.`;
 
@@ -64,9 +70,11 @@ function createTemplateSummary(
 
           return `${change.instrument.symbol}: ${percentage} since the previous review (${change.attentionLevel.toLowerCase()} attention).`;
         })
-      : [
+      : assessableCount > 0
+        ? [
           `${comparison.summary.none} instrument${comparison.summary.none === 1 ? "" : "s"} remained below the configured thresholds.`,
-        ];
+        ]
+        : [];
 
   if (comparison.summary.unavailable > 0) {
     highlights.push(
@@ -106,6 +114,11 @@ async function createOllamaSummary(
         dataStatus: change.dataStatus,
         priceChangePercent:
           change.priceChangePercent,
+        confidence: change.confidence,
+        signals: change.signals,
+        volatilityMultiple: change.volatilityMultiple,
+        volumeMultiple: change.volumeMultiple,
+        rangeBreakout: change.rangeBreakout,
         currentSource:
   change.current.quoteSource,
 
@@ -159,7 +172,7 @@ baselineSource:
           {
             role: "system",
             content:
-  "Summarize only the supplied market-watchlist facts. Mention every HIGH-attention instrument by symbol and exact percentage. Mention MEDIUM-attention instruments if present. Do not discuss generic market concepts. Do not invent causes, news, forecasts, recommendations, or investment advice. The summary must be 2 or 3 sentences. Each highlight must name one supplied instrument and its exact percentage. Explicitly mention unavailable comparisons.",
+              "Summarize only the supplied market-watchlist facts. Mention every HIGH-attention instrument by symbol and exact percentage. Mention MEDIUM-attention instruments if present. You may explain only signals explicitly present in the supplied signals array. Do not infer causes from volatility, breakouts, volume, or reversals. Do not discuss generic market concepts. Do not invent causes, news, forecasts, recommendations, or investment advice. The summary must be 2 or 3 sentences. Each highlight must name one supplied instrument and its exact percentage. Explicitly mention unavailable comparisons.",
           },
           {
             role: "user",
@@ -197,29 +210,15 @@ baselineSource:
     JSON.parse(body.message.content),
   );
 
-  const requiredSymbols = comparison.changes
-  .filter(
-    (change) =>
-      change.attentionLevel === "HIGH",
-  )
-  .map((change) => change.instrument.symbol);
-
-const generatedText = [
-  parsed.summary,
-  ...parsed.highlights,
-].join(" ");
-
-const omittedImportantSymbol =
-  requiredSymbols.some(
-    (symbol) =>
-      !generatedText.includes(symbol),
+  validateGeneratedReviewSummary(
+    parsed,
+    comparison.changes.map((change) => ({
+      symbol: change.instrument.symbol,
+      attentionLevel: change.attentionLevel,
+      dataStatus: change.dataStatus,
+      priceChangePercent: change.priceChangePercent,
+    })),
   );
-
-if (omittedImportantSymbol) {
-  throw new Error(
-    "AI summary omitted an important instrument",
-  );
-}
 
   return {
     ...parsed,

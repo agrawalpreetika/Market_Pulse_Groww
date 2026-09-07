@@ -103,6 +103,7 @@ export const instrumentRepository = {
       id: true,
       symbol: true,
       exchange: true,
+      timezone: true,
       providerIdentifier: true,
     },
 

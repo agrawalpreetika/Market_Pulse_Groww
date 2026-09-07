@@ -174,7 +174,7 @@ Snapshot items include quote source. Source families determine compatibility:
 
 ### ADR-014: Use deterministic, versioned change rules
 
-**Status:** Implemented MVP; richer rules planned
+**Status:** Implemented V1 and first V2 context upgrade; historical signals planned
 
 Threshold logic is deterministic and its policy version is saved with each review.
 
@@ -182,7 +182,13 @@ Threshold logic is deterministic and its policy version is saved with each revie
 
 Raw cumulative volume is not treated as meaningful by itself because observations at different times of day are not directly comparable.
 
-Planned signals include volatility-adjusted price change, time-aligned abnormal volume, price gaps, recent-range breakouts, verified events, and user-specific thresholds.
+`price-context-v2` freezes a watchlist item's custom price threshold into the immutable snapshot, derives medium/high bands at 2x/4x, reports the applied bands, adds explicit confidence, and identifies a material current-session reversal from the frozen previous close.
+
+`historical-context-v3` additionally freezes up to 30 prior trading-day observations from the same provider family. It keeps the final stored observation per India-market date, requires at least 10 days for a recent range and median volume, and at least 11 prices/10 returns for sample volatility. A 0.25% volatility floor limits division-by-near-zero amplification. Breakouts require the absolute user threshold too; volatility can only elevate a movement that already passes that threshold.
+
+Volume is considered only for a `CLOSED` session and is compared with the median—not mean—of at least 10 prior daily observations. This avoids comparing partial intraday cumulative volume with completed days and reduces sensitivity to isolated volume spikes. Existing reviews retain their original V1 or V2 semantics through the policy registry.
+
+Raw cumulative volume remains excluded because two snapshots captured at different times of day are not comparable. Planned signals include volatility-adjusted price change, time-aligned abnormal volume, price gaps, recent-range breakouts, and verified events. Each will require enough normalized historical observations and will decline to assess when evidence is insufficient.
 
 ### ADR-015: Prefer “not assessed” over false precision
 
@@ -199,6 +205,8 @@ In financial software, a visible limitation is safer than a precise-looking resu
 The deterministic engine supplies verified symbols, percentages, reasons, warnings, sources, and attention levels. Ollama generates only a concise explanation from those facts.
 
 AI must not calculate the authoritative percentage, invent causes/news, predict prices, give investment advice, or override a blocked comparison. Structured output is validated and a deterministic template remains available when Ollama fails.
+
+Generated text is also checked against the fact set: every stated percentage must exactly match a verified comparison, high-attention instruments must appear with their verified percentage, highlights must identify a known symbol, and unavailable instruments cannot be assigned low/medium/high attention. Thus `null` can never be rewritten as `0%`; any violation activates the deterministic fallback.
 
 ### ADR-017: Charts provide context, not causation
 
@@ -322,7 +330,63 @@ This circuit state is intentionally process-local for the current single-worker 
 
 Measure quote attempts/successes/rejections, provider latency/status, latest-quote age, freshness distribution, scheduler lag, discovery availability, AI fallback rate, transaction conflicts, and review failures. Logs should contain provider, instrument identifier, run ID, and error category—but never credentials or sensitive user data.
 
+**Implemented baseline:** every manual or scheduled refresh receives a UUID run ID and emits structured JSON for completion, skip, or failure. Completion includes provider duration, total duration, requested/received/accepted/rejected counts, categorized rejection counts, storage outcomes, and lease coordination mode. Errors are reduced to name and message; secrets, connection strings, request headers, and user records are excluded.
+
+`GET /api/health` is an uncached, sanitized readiness view. PostgreSQL failure returns HTTP 503 and `unhealthy`; configured-but-unavailable Redis returns HTTP 200 with `degraded` because cache/coordination currently fail open. It also reports the Yahoo circuit state and latest stored quote age. Quote age is diagnostic rather than readiness because closed markets legitimately have old observations.
+
 ## Testing strategy
+
+### V4 audit correction
+
+New reviews use `observed-context-v4`. PostgreSQL selects the final eligible observation per instrument/source/India date within a 90-calendar-day window before loading rows; the most recent 30 prior dates form the observed-price range. This removes the 200-raw-quote cutoff. These are sampled prices, not certified OHLC bars. V4 does not compute or score daily volatility or completed-session abnormal volume from this dataset, even if legacy reference values are passed in. Provider daily bars and matched-horizon returns remain deferred. Existing V3 snapshots are preserved, and the UI labels their methodology limitations. Earlier statements that all historical features were production complete are superseded by this section.
+
+### ADR-025: Store completed daily candles separately from quote observations
+
+**Status:** Storage, Yahoo ingestion, validation, idempotent backfill, and versioned V5 integration implemented
+
+`quotes` records what the application observed at a moment in time. It is appropriate for the latest-price table and review snapshots, but the last observation stored on a date is not necessarily that session's official close or full-session volume. A separate `daily_price_bars` table therefore stores provider daily OHLCV candles keyed by instrument, source, and exchange trading date.
+
+The Yahoo backfill requests daily candles, converts timestamps using each instrument's exchange timezone, and always excludes the current exchange date. It rejects missing/non-positive prices, unsafe or negative volume, and internally contradictory OHLC ranges. Repeated jobs upsert the same natural key so provider corrections are accepted without creating duplicates. Raw OHLC is retained; an adjusted close is stored separately and the adjustment representation is explicit. Raw and adjusted series must never be mixed silently.
+
+Every row preserves provider source, provider timestamp, receipt time, and trading date. The source remains `yahoo-finance-unofficial`: structural validation and completed-date filtering do not make an unofficial candle exchange-certified. Missing dates stay missing rather than being manufactured because holidays, suspensions, provider gaps, and listing changes cannot safely be distinguished using weekday arithmetic.
+
+Run `npm run market:history` as a daily backfill after the market session. It works on unique actively watched instruments and stays separate from the five-minute quote worker, avoiding a three-month history request on every quote refresh. At larger scale this becomes a bounded, provider-quota-aware queue job.
+
+V4 continues to decline volatility and abnormal-volume scoring. New V5 snapshots consume these rows using the safeguards in ADR-027; old reviews retain their original policy semantics.
+
+### ADR-027: Use completed daily evidence through a versioned V5 policy
+
+**Status:** Implemented for new reviews
+
+`daily-context-v5` is the current policy. It freezes daily-history provenance, price basis, sample counts, recent range, median volume, review-horizon session count, and horizon-adjusted volatility into every new review snapshot. Later backfills cannot rewrite an existing review's result.
+
+Volatility uses at least 11 daily bars and 10 adjusted-close returns. Daily standard deviation is scaled by the square root of completed sessions since the acknowledged baseline, so a multi-session review movement is not compared directly with a one-day volatility value. A same-session comparison conservatively uses one session. If the baseline predates the oldest available bar, horizon coverage is incomplete and volatility is withheld.
+
+Recent-range breakouts use raw daily highs and lows from at least 10 completed dates. They are withheld when the adjusted-close/raw-close factor changes by more than 1% inside the window, because that suggests a corporate-action or other price-basis discontinuity. Completed-session volume uses the median of at least 10 daily bars and is evaluated only when the current quote reports `CLOSED`. Historical context never bypasses the user's minimum movement threshold.
+
+Daily bars must belong to the current quote's provider family and must have been received before the snapshot time. Yahoo data remains explicitly unofficial: “validated completed daily evidence” means structurally checked and not from the current exchange date, not exchange-certified or guaranteed complete. A licensed feed would strengthen provenance without changing the policy boundary.
+
+V1–V4 remain registered for deterministic replay. V3 preserves its legacy behavior, V4 preserves its conservative refusal of unsupported historical scoring, and only new V5 snapshots use the daily context.
+
+### ADR-026: Use attention-first progressive disclosure
+
+**Status:** Implemented
+
+The review and current-market table answer different questions. The review answers “what changed since I last checked and deserves attention?” The market table answers “what is the latest stored price and today's movement?” Both remain because removing either would lose a core requirement, but they no longer receive equal visual weight or repeat all details.
+
+The review initially shows only instruments that crossed a meaningful-movement level, plus a clear calm state when none did. Below-threshold and unassessable comparisons are grouped behind “other comparisons.” Each result exposes one plain-language reason; confidence, thresholds, provenance, methodology notes, data limitations, and review markers live behind “Why this result?” AI explanation is optional and collapsed by default.
+
+The latest-price table keeps symbol, price, today's movement, and availability visible. Volume, provider provenance, charts, and removal controls are secondary details. Instrument search opens only when requested, custom thresholds are labeled advanced, and rename/delete controls are grouped as watchlist settings.
+
+This is progressive disclosure, not removal: expert and evaluator evidence remains reachable, while a first-time user can understand the default screen without learning the internal policy model. Native buttons, `details`/`summary`, headings, status regions, and expanded-state attributes preserve keyboard and assistive-technology behavior.
+
+### Correctness audit — outstanding limitations
+
+Earlier completion labels describe implemented features, not production certification. V3 historical scoring retains known methodological weaknesses for reproducibility, while V4 refuses its unsupported volatility and volume claims. V5 now uses separately stored completed-date candles, adjusted-close return continuity, review-horizon scaling, provider compatibility, and immutable snapshot references. Yahoo remains unofficial, exchange-calendar completeness is not independently certified, and corporate-action handling is deliberately conservative rather than comprehensive.
+
+AI percentage attribution now requires each percentage-bearing sentence/highlight to identify exactly one fact and match that instrument's signed percentage. Unavailable instruments cannot borrow another instrument's zero. Ambiguous same-symbol exchange listings and multi-instrument numerical sentences trigger deterministic fallback. Regression tests cover these cases. This conservative check does not prove all natural-language statements or causal claims correct; further structured-output validation remains.
+
+Browser coverage uses Playwright/Chromium against the production build on port 3100. Run `npm run build` followed by `npm run test:e2e` with local PostgreSQL running. The test creates unique temporary accounts and a catalog instrument, checks registration, watchlist persistence, custom-threshold storage, review acknowledgement, cross-user HTTP isolation and logout, then deletes only its own fixtures. Search responses are stubbed for repeatability; this does not verify live Yahoo discovery. Real session cookies, API writes and PostgreSQL are exercised. Failure traces are local ignored artifacts and can contain test-session information. This baseline does not yet cover all chart, provider-failure or multi-tab races.
 
 Current automated coverage includes authentication guards, PostgreSQL-backed cross-user watchlist and review isolation, threshold boundaries, negative movement, invalid prices, missing baselines, stale/conflicted/delayed/closed data, provenance compatibility, warning deduplication, Yahoo normalization and deduplication, genuine empty searches, HTTP errors, malformed responses, and network failures. Database-backed checks live in a separate `test:integration` command so the fast unit suite does not unexpectedly require PostgreSQL.
 
@@ -336,8 +400,11 @@ Next coverage should include HTTP-level session/cookie authorization, repository
 4. **Completed for MVP:** credentials registration/login, authenticated ownership, protected dashboard, logout, authentication-guard tests, and PostgreSQL-backed cross-user ownership tests. HTTP cookie/session flows and session-expiry UX remain hardening work.
 5. **Completed locally:** bounded Yahoo timeouts, retry budgets with exponential backoff and jitter, and an in-process circuit breaker.
 6. **Completed:** Redis discovery caching and distributed refresh locks with graceful degradation.
-7. **Next:** richer versioned change policy and broader instrumentation.
-8. **Before production:** licensed provider decision, deployment, security review, retention policy, monitoring, and load tests.
+7. **Completed with explicit limits:** V5 integrates validated completed-date daily OHLCV into immutable, horizon-aware historical context. V1–V4 remain replayable; Yahoo is still unofficial.
+8. **Next:** automate the daily backfill, add retention/downsampling, and expand browser coverage for V5 signal presentation.
+
+The dashboard exposes the policy version, confidence, exact applied low/medium/high thresholds, verified signal labels, and historical sample availability. Custom thresholds are configured per watchlist membership during instrument addition and are frozen into reviews; later UI changes cannot rewrite past review meaning. AI receives the same verified V3 fields and may describe only signal identifiers supplied by deterministic code.
+9. **Before production:** licensed provider decision, deployment, security review, retention policy, monitoring, and load tests.
 
 ## Evaluator-ready explanation
 

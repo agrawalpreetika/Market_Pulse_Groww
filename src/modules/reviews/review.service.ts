@@ -251,6 +251,8 @@ providerTimestamp:
           {
             price:
               item.price?.toNumber() ?? null,
+            previousClose:
+              item.previousClose?.toNumber() ?? null,
             volume: item.volume,
             quoteQuality:
               item.quoteQuality,
@@ -261,12 +263,31 @@ providerTimestamp:
 
 quoteAgeSeconds:
   item.quoteAgeSeconds,
+            customThresholdPercent:
+              item.customThresholdPercent?.toNumber() ?? null,
+            marketSession: item.marketSession,
+            referenceSampleCount: item.referenceSampleCount,
+            referenceVolatilityPercent:
+              item.referenceVolatilityPercent?.toNumber() ?? null,
+            referenceHigh: item.referenceHigh?.toNumber() ?? null,
+            referenceLow: item.referenceLow?.toNumber() ?? null,
+            referenceMedianVolume: item.referenceMedianVolume,
+            referenceVolumeSampleCount:
+              item.referenceVolumeSampleCount,
+            referenceHorizonSessions:
+              item.referenceHorizonSessions,
+            referenceSource:
+              item.referenceSource,
+            referencePriceBasis:
+              item.referencePriceBasis,
           },
           baselineItem
             ? {
                 price:
                   baselineItem.price?.toNumber() ??
                   null,
+                previousClose:
+                  baselineItem.previousClose?.toNumber() ?? null,
                 volume: baselineItem.volume,
                 quoteQuality:
                 baselineItem.quoteQuality,
@@ -277,6 +298,8 @@ quoteAgeSeconds:
 
 quoteAgeSeconds:
   baselineItem.quoteAgeSeconds,
+                customThresholdPercent:
+                  baselineItem.customThresholdPercent?.toNumber() ?? null,
               }
             : null,
           policy, 
@@ -302,6 +325,19 @@ quoteAgeSeconds:
     item.quoteAgeSeconds,
   providerTimestamp:
             item.providerTimestamp,
+  referenceContext: {
+    sampleCount: item.referenceSampleCount,
+    volatilityPercent:
+      item.referenceVolatilityPercent?.toString() ?? null,
+    recentHigh: item.referenceHigh?.toString() ?? null,
+    recentLow: item.referenceLow?.toString() ?? null,
+    medianDailyVolume:
+      item.referenceMedianVolume?.toString() ?? null,
+    volumeSampleCount: item.referenceVolumeSampleCount,
+    horizonSessions: item.referenceHorizonSessions,
+    source: item.referenceSource,
+    priceBasis: item.referencePriceBasis,
+  },
   
 },
 

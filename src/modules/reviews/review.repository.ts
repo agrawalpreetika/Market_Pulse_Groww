@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/infrastructure/database/prisma";
 import { CURRENT_CHANGE_POLICY_VERSION } from "@/modules/change-detection/change-detection-policy";
 import { classifyQuoteFreshness } from "@/modules/market-data/classify-quote-freshness";
+import { buildDailyReferenceContext } from "@/modules/change-detection/build-daily-reference-context";
 
 async function createOrReuseInTransaction(
   watchlistId: string,
@@ -45,6 +46,8 @@ async function createOrReuseInTransaction(
         };
       }
 
+      const snapshotAt = new Date();
+
       const watchlist =
         await transaction.watchlist.findFirst({
           where: {
@@ -78,6 +81,7 @@ async function createOrReuseInTransaction(
         return null;
       }
 
+      const ids = watchlist.items.map(item => item.instrumentId);
       const baselineReview =
         await transaction.watchlistReview.findFirst({
           where: {
@@ -92,10 +96,32 @@ async function createOrReuseInTransaction(
 
           select: {
             id: true,
+            snapshotAt: true,
+            items: {
+              select: {
+                instrumentId: true,
+                providerTimestamp: true,
+              },
+            },
           },
         });
-      
-      const snapshotAt = new Date();
+
+      const dailyBars = ids.length === 0
+        ? []
+        : await transaction.dailyPriceBar.findMany({
+            where: {
+              instrumentId: { in: ids },
+              tradingDate: {
+                gte: new Date(snapshotAt.getTime() - 120 * 86_400_000),
+              },
+              receivedAt: { lte: snapshotAt },
+            },
+            orderBy: { tradingDate: "asc" },
+          });
+
+      const baselineItems = new Map(
+        baselineReview?.items.map((item) => [item.instrumentId, item]) ?? [],
+      );
 
       const review =
         await transaction.watchlistReview.create({
@@ -123,6 +149,24 @@ async function createOrReuseInTransaction(
         })
       : null;
 
+    const baselineItem = baselineItems.get(item.instrumentId);
+    const reference = buildDailyReferenceContext({
+      currentSource: quote?.source ?? null,
+      currentTimestamp: quote?.providerTimestamp ?? null,
+      baselineTimestamp: baselineItem?.providerTimestamp ?? baselineReview?.snapshotAt ?? null,
+      timezone: item.instrument.timezone,
+      bars: dailyBars.filter((bar) => bar.instrumentId === item.instrumentId).map((bar) => ({
+        tradingDate: bar.tradingDate,
+        open: bar.open.toNumber(),
+        high: bar.high.toNumber(),
+        low: bar.low.toNumber(),
+        close: bar.close.toNumber(),
+        adjustedClose: bar.adjustedClose?.toNumber() ?? null,
+        volume: bar.volume,
+        source: bar.source,
+      })),
+    });
+
     return {
       instrumentId: item.instrument.id,
 
@@ -147,6 +191,19 @@ async function createOrReuseInTransaction(
 
       quoteAgeSeconds:
         freshness?.ageSeconds ?? null,
+
+      customThresholdPercent:
+        item.customThreshold ?? null,
+
+      referenceSampleCount: reference.sampleCount,
+      referenceVolatilityPercent: reference.volatilityPercent,
+      referenceHigh: reference.recentHigh,
+      referenceLow: reference.recentLow,
+      referenceMedianVolume: reference.medianDailyVolume,
+      referenceVolumeSampleCount: reference.volumeSampleCount,
+      referenceHorizonSessions: reference.horizonSessions,
+      referenceSource: reference.source,
+      referencePriceBasis: reference.priceBasis,
 
       providerTimestamp:
         quote?.providerTimestamp ?? null,
